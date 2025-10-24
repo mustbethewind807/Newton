@@ -1,5 +1,6 @@
 // define a namespace
 const Newton = {
+  Camera: {},
   Vector: {},
   Entity: {},
   Engine: {},
@@ -8,7 +9,7 @@ const Newton = {
 // prevents pollution
 (function () {
   // Make references to the stuff
-  const { Entity, Vector, Engine } = Newton;
+  const { Vector, Camera, Entity, Engine } = Newton;
 
   // crappy vector library
   // all functions are static to save memory
@@ -57,6 +58,49 @@ const Newton = {
     Vector.copy = function (v) {
       return { x: v.x, y: v.y };
     };
+  })();
+
+  // Camera module
+  // Is a camera that renders things
+  // And maybe does other stuff
+  (function () {
+    Camera.create = function (options = {}) {
+      let cam = {};
+      cam.pos = options.pos || { x: 0, y: 0 };
+      cam.vel = { x: 0, y: 0 };
+      cam.posOff = { x: 0, y: 0 };
+      cam.lerpSpeed = 0.2;
+      cam.maxSpeed = options.maxSpeed || 10;
+      cam.w = options.w || 400;
+      cam.h = options.h || 400;
+      cam.linkedEntity = options.linkedEntity || null;
+      
+      cam.link = function (entity) {
+        this.linkedEntity = entity;
+      }
+      
+      cam.unlink = function () {
+        this.linkedEntity = null;
+      }
+      
+      cam.applyForce = function (f) {
+        this.vel = Vector.add(this.vel, f);
+      }
+      
+      cam.update = function () {
+        if (cam.linkedEntity) {
+          let wishSpeed = Vector.lerp(this.pos, this.linkedEntity.pos, this.lerpSpeed);
+          this.vel = Vector.add(this.vel, wishSpeed);
+        }
+        
+        this.vel = Vector.limit(this.vel, this.maxSpeed);
+        this.pos = Vector.add(this.pos, this.vel);
+        this.vel = { x: 0, y: 0 };
+      }
+      
+      // TODO: WORK ON RENDERING ENTITIES GIVEN TO THE CAMERA
+      return cam;
+    }
   })();
 
   // Adds all the entity stuff
@@ -127,9 +171,14 @@ const Newton = {
         });
         
         for (let action of this._actions) {
-          // TODO ---------------------------------------------------------
-          // Resolve actions
-          // Do stuff
+          switch (action.type) {
+            case "removeEntity":
+              // Remove item
+              this._entities.splice(action.options.id, 1);
+              break;
+            default:
+              console.error(`Illegal action type: ${action.type}`);
+          }
         }
         
         this.clearActions();
@@ -190,6 +239,21 @@ const Newton = {
         // Action time
         this.runActions();
       };
+
+      // TODO: REMOVE THIS AND MOVE THIS TO CAMERA
+      engine.render = function () {
+        for (let e of this._entities) {
+          e.render();
+
+          for (let other of this._entities) {
+            if (other === e) continue;
+            if (Entity.collide(e, other) {
+              fill(255, 0, 0);
+              rect(e.pos.x, e.pos.y, e.w, e.h);
+            }
+          }
+        }
+      }
 
       return engine;
     };
