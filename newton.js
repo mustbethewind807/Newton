@@ -1,7 +1,7 @@
 // define a namespace
 const Newton = {
-  Camera: {},
   Vector: {},
+  Camera: {},
   Entity: {},
   Engine: {},
 };
@@ -54,12 +54,27 @@ const Newton = {
     Vector.cross = function (a, b) {
       return a.x * b.y - a.y * b.x;
     };
+
+    Vector.limit = function (v, n) {
+      if (Vector.magSq(v) < n * n) return v;
+      let out = Vector.copy(v);
+      out = Vector.normalize(out);
+      out = Vector.mult(out, n);
+      return out;
+    };
     
+    Vector.lerp = function (a, b, t) {
+      let c = Vector.sub(b, a);
+      c = Vector.mult(c, t);
+      return Vector.add(c, a);
+    }
+
+    // I give up
     Vector.copy = function (v) {
       return { x: v.x, y: v.y };
     };
   })();
-
+  
   // Camera module
   // Is a camera that renders things
   // And maybe does other stuff
@@ -69,10 +84,12 @@ const Newton = {
       cam.pos = options.pos || { x: 0, y: 0 };
       cam.vel = { x: 0, y: 0 };
       cam.posOff = { x: 0, y: 0 };
-      cam.lerpSpeed = 0.2;
+      cam.lerpSpeed = 1;
       cam.maxSpeed = options.maxSpeed || 10;
       cam.w = options.w || 400;
       cam.h = options.h || 400;
+      cam.halfw = cam.w / 2;
+      cam.halfh = cam.h / 2;
       cam.linkedEntity = options.linkedEntity || null;
       
       cam.link = function (entity) {
@@ -83,14 +100,9 @@ const Newton = {
         this.linkedEntity = null;
       }
       
-      cam.applyForce = function (f) {
-        this.vel = Vector.add(this.vel, f);
-      }
-      
       cam.update = function () {
-        if (cam.linkedEntity) {
-          let wishSpeed = Vector.lerp(this.pos, this.linkedEntity.pos, this.lerpSpeed);
-          this.vel = Vector.add(this.vel, wishSpeed);
+        if (this.linkedEntity) {
+          this.pos = Vector.lerp(this.pos, this.linkedEntity.pos, this.lerpSpeed);
         }
         
         this.vel = Vector.limit(this.vel, this.maxSpeed);
@@ -98,7 +110,28 @@ const Newton = {
         this.vel = { x: 0, y: 0 };
       }
       
-      // TODO: WORK ON RENDERING ENTITIES GIVEN TO THE CAMERA
+      cam.render = function (entities) {
+        // Only render entities that are within the camera boundary
+        let renderedEntities = entities.filter(function (entity) {
+          return Entity.collide(cam, entity);
+        });
+        renderedEntities.sort(function (a, b) {
+          return b.displayPriority - a.displayPriority;
+        });
+        push();
+        translate(-this.pos.x + this.halfw, -this.pos.y + this.halfh);
+        
+        // TODO: PUT RENDERING BACK INTO THE ENTITY
+        rectMode(CENTER);
+        noFill();
+        stroke(0);
+        strokeWeight(2);
+        for (let e of renderedEntities) {
+          rect(e.pos.x, e.pos.y, e.w, e.h);
+        }
+        pop();
+      }
+      
       return cam;
     }
   })();
@@ -106,13 +139,17 @@ const Newton = {
   // Adds all the entity stuff
   (function () {
     Entity.create = function (options = {}) {
-      // Movement stuff
       let entity = {};
+
+      // Movement stuff
       entity.pos = options.pos || { x: 0, y: 0 };
       entity.vel = options.vel || { x: 0, y: 0 };
       entity.acc = { x: 0, y: 0 };
+      entity.maxVel = options.maxVel || Infinity;
       entity.w = options.w || 32;
       entity.h = options.h || 32;
+      entity.halfw = entity.w * 0.5;
+      entity.halfh = entity.h * 0.5;
       entity.mass = options.mass || 1;
 
       // Important engine running stuff
@@ -123,6 +160,7 @@ const Newton = {
       entity.restitution = options.restitution || 0;
       entity.collPriority = options.collPriority || 0;
       entity.isStatic = options.isStatic || false;
+      entity.displayPriority = options.displayPriority || 0;
 
       // Important stuff
       entity.label = options.label || null; // Classify objects with a tag!
@@ -137,39 +175,42 @@ const Newton = {
         this.acc = Vector.add(this.acc, force);
       };
 
-      // Extra debug stuff
-      entity.render = function () {
-        // Temporary
-        rectMode(CENTER);
-        stroke(0);
-        strokeWeight(2);
-        noFill();
-        rect(this.pos.x, this.pos.y, this.w, this.h);
-      };
-
       return entity;
+    };
+    
+    // TODO: REIMPLEMENT ENTITY.RENDER AND MAKE IT CUSTOMIZABLE WITH OPTIONS AND MAYBE ADD A DEFAULT LIKE THE NORMAL RECTANGLE
+
+    Entity.collide = function (a, b) {
+      return (
+        a.pos.x + a.halfw > b.pos.x - b.halfw &&
+        a.pos.x - a.halfw < b.pos.x + b.halfw &&
+        a.pos.y + a.halfh > b.pos.y - b.halfh &&
+        a.pos.y - a.halfh < b.pos.y + b.halfh
+      );
     };
   })();
 
-  // Engine stuff
   (function () {
+    // Actions are how the engine does important stuff that can't be done on the fly (or best not to do on the fly)
+    Engine.createAction = function (type, options, priority) {
+      return { type, options, priority };
+    };
+
     Engine.create = function (options) {
       let engine = {};
       engine._entities = [];
       engine._gravity = { x: 0, y: 0.25 };
-
-      // Actions are how the engine does importants stuff that can't be done on the fly
       engine._actions = [];
 
       engine.addAction = function (action) {
         this._actions.push(action);
       };
-      
+
       engine.runActions = function () {
         this._actions.sort(function (a, b) {
           return b.priority - a.priority;
         });
-        
+
         for (let action of this._actions) {
           switch (action.type) {
             case "removeEntity":
@@ -180,21 +221,17 @@ const Newton = {
               console.error(`Illegal action type: ${action.type}`);
           }
         }
-        
+
         this.clearActions();
-      }
-      
+      };
+
       engine.clearActions = function () {
         engine._actions = [];
-      }
+      };
 
-      engine.addEntity = function (obj, value) {
+      engine.addEntity = function (obj) {
         // something can be either an entity or an array of entities
         if (!Array.isArray(obj)) {
-          if (value) {
-            this._entities[value] = obj;
-            return;
-          }
           this._entities.push(obj);
           return;
         }
@@ -205,18 +242,20 @@ const Newton = {
 
       engine.removeEntity = function (obj, priority) {
         if (typeof obj === "number") {
-          this.addAction(Engine.createAction("remove", obj, priority || 0));
+          this.addAction(
+            Engine.createAction("removeEntity", { id: obj }, priority || 0)
+          );
           return;
         }
-        for (let i = 0; i < this._entities; i++) {
+        for (let i = 0; i < this._entities.length; i++) {
           let e = this._entities[i];
           if (e === obj) {
-            this.addAction(Engine.createAction("remove", i, priority || 0));
+            this.addAction(
+              Engine.createAction("removeEntity", { id: i }, priority || 0)
+            );
             return;
           }
         }
-        console.error('No matching object found');
-        console.log(`Object: ${obj}`);
       };
 
       engine.update = function () {
@@ -232,36 +271,20 @@ const Newton = {
         for (let e of this._entities) {
           if (e.isStatic) continue;
           e.vel = Vector.add(e.acc, e.vel);
+          e.vel = Vector.limit(e.vel, e.maxVel);
           e.pos = Vector.add(e.vel, e.pos);
           e.acc = Vector.mult(e.acc, 0);
         }
-        
+
         // Action time
         this.runActions();
       };
-
-      // TODO: REMOVE THIS AND MOVE THIS TO CAMERA
-      engine.render = function () {
-        for (let e of this._entities) {
-          e.render();
-
-          for (let other of this._entities) {
-            if (other === e) continue;
-            if (Entity.collide(e, other) {
-              fill(255, 0, 0);
-              rect(e.pos.x, e.pos.y, e.w, e.h);
-            }
-          }
-        }
-      }
+      
+      engine.render = function (cam) {
+        cam.render(this._entities);
+      };
 
       return engine;
-    };
-
-    // an action has a type, id, and priority
-    // it is just a simple object
-    Engine.createAction = function (type, id, priority) {
-      return { type, id, priority };
     };
   })();
 })();
