@@ -62,19 +62,19 @@ const Newton = {
       out = Vector.mult(out, n);
       return out;
     };
-    
+
     Vector.lerp = function (a, b, t) {
       let c = Vector.sub(b, a);
       c = Vector.mult(c, t);
       return Vector.add(c, a);
-    }
+    };
 
     // I give up
     Vector.copy = function (v) {
       return { x: v.x, y: v.y };
     };
   })();
-  
+
   // Camera module
   // Is a camera that renders things
   // And maybe does other stuff
@@ -91,36 +91,40 @@ const Newton = {
       cam.halfw = cam.w / 2;
       cam.halfh = cam.h / 2;
       cam.linkedEntity = options.linkedEntity || null;
-      
+
       cam.link = function (entity) {
         this.linkedEntity = entity;
-      }
-      
+      };
+
       cam.unlink = function () {
         this.linkedEntity = null;
-      }
-      
+      };
+
       cam.update = function () {
         if (this.linkedEntity) {
-          this.pos = Vector.lerp(this.pos, this.linkedEntity.pos, this.lerpSpeed);
+          this.pos = Vector.lerp(
+            this.pos,
+            this.linkedEntity.pos,
+            this.lerpSpeed
+          );
         }
-        
+
         this.vel = Vector.limit(this.vel, this.maxSpeed);
         this.pos = Vector.add(this.pos, this.vel);
         this.vel = { x: 0, y: 0 };
-      }
-      
+      };
+
       cam.render = function (entities) {
         // Only render entities that are within the camera boundary
         let renderedEntities = entities.filter(function (entity) {
-          return Entity.collide(cam, entity);
+          return Entity.checkCollide(cam, entity);
         });
         renderedEntities.sort(function (a, b) {
           return b.displayPriority - a.displayPriority;
         });
         push();
         translate(-this.pos.x + this.halfw, -this.pos.y + this.halfh);
-        
+
         // TODO: PUT RENDERING BACK INTO THE ENTITY
         rectMode(CENTER);
         noFill();
@@ -130,13 +134,14 @@ const Newton = {
           rect(e.pos.x, e.pos.y, e.w, e.h);
         }
         pop();
-      }
-      
+      };
+
       return cam;
-    }
+    };
   })();
 
   // Adds all the entity stuff
+  // is for a platforming engine so canJump
   (function () {
     Entity.create = function (options = {}) {
       let entity = {};
@@ -151,6 +156,7 @@ const Newton = {
       entity.halfw = entity.w * 0.5;
       entity.halfh = entity.h * 0.5;
       entity.mass = options.mass || 1;
+      entity.canJump = false;
 
       // Important engine running stuff
       entity.gravityAffected = options.gravityAffected;
@@ -164,7 +170,7 @@ const Newton = {
 
       // Important stuff
       entity.label = options.label || null; // Classify objects with a tag!
-      entity.collLabel = options.collLabel || null;
+      entity.noColl = options.noColl || []; // What to not check collisions for
 
       // Important function stuff
       entity.applyForce = function (f, globalForce) {
@@ -175,12 +181,41 @@ const Newton = {
         this.acc = Vector.add(this.acc, force);
       };
 
+      // old habits
+      entity.collide = function (other) {
+        // only do collision if you actually collide
+        if (!Entity.checkCollide(this, other)) return;
+
+        // collide in x axis
+        (function () {
+          if (entity.vel.x < 0) {
+            entity.vel.x = 0;
+            entity.pos.x = other.pos.x + other.w;
+          } else if (entity.vel.x > 0) {
+            entity.vel.x = 0;
+            entity.pos.x = other.pos.x - other.w;
+          }
+        })();
+
+        // collide in y axis
+        (function () {
+          if (entity.vel.y < 0) {
+            entity.pos.y = other.pos.y + other.h;
+            entity.vel.y = 0.1; // arbitrary amount
+          } else if (entity.vel.y > 0) {
+            entity.pos.y = other.pos.y - other.h;
+            entity.vel.y = 0;
+            entity.canJump = true;
+          }
+        })();
+      };
+
       return entity;
     };
-    
+
     // TODO: REIMPLEMENT ENTITY.RENDER AND MAKE IT CUSTOMIZABLE WITH OPTIONS AND MAYBE ADD A DEFAULT LIKE THE NORMAL RECTANGLE
 
-    Entity.collide = function (a, b) {
+    Entity.checkCollide = function (a, b) {
       return (
         a.pos.x + a.halfw > b.pos.x - b.halfw &&
         a.pos.x - a.halfw < b.pos.x + b.halfw &&
@@ -214,8 +249,12 @@ const Newton = {
         for (let action of this._actions) {
           switch (action.type) {
             case "removeEntity":
-              // Remove item
+              // Remove entity
               this._entities.splice(action.options.id, 1);
+              break;
+            case "addEntity":
+              // Add entity
+              this._entities.push(action.options.entity);
               break;
             default:
               console.error(`Illegal action type: ${action.type}`);
@@ -232,11 +271,11 @@ const Newton = {
       engine.addEntity = function (obj) {
         // something can be either an entity or an array of entities
         if (!Array.isArray(obj)) {
-          this._entities.push(obj);
+          this.addAction(Engine.createAction("addEntity", { entity: obj }, 0));
           return;
         }
         for (let e of obj) {
-          this._entities.push(e);
+          this.addAction(Engine.createAction("addEntity", { entity: e }, 0));
         }
       };
 
@@ -274,12 +313,24 @@ const Newton = {
           e.vel = Vector.limit(e.vel, e.maxVel);
           e.pos = Vector.add(e.vel, e.pos);
           e.acc = Vector.mult(e.acc, 0);
+
+          
+          for (let other of this._entities) {
+            // don't collide with yourself
+            if (other === e || other === undefined) continue;
+            // don't collide with things of no colliding
+            for (let tag of e.noColl) {
+              if (other.label === tag) continue;
+            }
+            // collision time
+            e.collide(other);
+          }
         }
 
         // Action time
         this.runActions();
       };
-      
+
       engine.render = function (cam) {
         cam.render(this._entities);
       };
