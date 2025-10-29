@@ -124,14 +124,8 @@ const Newton = {
         });
         push();
         translate(-this.pos.x + this.halfw, -this.pos.y + this.halfh);
-
-        // TODO: PUT RENDERING BACK INTO THE ENTITY
-        rectMode(CENTER);
-        noFill();
-        stroke(0);
-        strokeWeight(2);
         for (let e of renderedEntities) {
-          rect(e.pos.x, e.pos.y, e.w, e.h);
+          e.render();
         }
         pop();
       };
@@ -155,8 +149,10 @@ const Newton = {
       entity.h = options.h || 32;
       entity.halfw = entity.w * 0.5;
       entity.halfh = entity.h * 0.5;
+      entity.friction = 0.3;
       entity.mass = options.mass || 1;
       entity.canJump = false;
+      entity.grounded = false;
 
       // Important engine running stuff
       entity.gravityAffected = options.gravityAffected;
@@ -186,29 +182,49 @@ const Newton = {
         // only do collision if you actually collide
         if (!Entity.checkCollide(this, other)) return;
 
-        // collide in x axis
-        (function () {
-          if (entity.vel.x < 0) {
-            entity.vel.x = 0;
-            entity.pos.x = other.pos.x + other.w;
-          } else if (entity.vel.x > 0) {
-            entity.vel.x = 0;
-            entity.pos.x = other.pos.x - other.w;
-          }
-        })();
-
         // collide in y axis
+
+        // very useful for preventing teleportations
+        // remove it and see what happens
+        let didColl = false;
         (function () {
           if (entity.vel.y < 0) {
-            entity.pos.y = other.pos.y + other.h;
-            entity.vel.y = 0.1; // arbitrary amount
+            didColl = true;
+            entity.pos.y = other.pos.y + other.halfh + entity.halfh;
+            
+            entity.vel.y = 0; // arbitrary amount
           } else if (entity.vel.y > 0) {
-            entity.pos.y = other.pos.y - other.h;
+            didColl = true;
+            entity.pos.y = other.pos.y - other.halfh - entity.halfh;
             entity.vel.y = 0;
             entity.canJump = true;
+            entity.grounded = true;
+          }
+        })();
+        if (didColl) return;
+
+        // collide in x axis
+        (function () {
+          if (entity.vel.x > 0) {
+            entity.vel.x = 0;
+            entity.pos.x = other.pos.x + other.halfw + entity.halfw;
+          } else if (entity.vel.x < 0) {
+            entity.vel.x = 0;
+            entity.pos.x = other.pos.x - other.halfw - entity.halfw;
           }
         })();
       };
+      if (options.render) {
+        entity.render = options.render;
+      } else {
+        entity.render = function () {
+          rectMode(CENTER);
+          noFill();
+          stroke(0);
+          strokeWeight(2);
+          rect(entity.pos.x, entity.pos.y, entity.w, entity.h);
+        };
+      }
 
       return entity;
     };
@@ -313,8 +329,16 @@ const Newton = {
           e.vel = Vector.limit(e.vel, e.maxVel);
           e.pos = Vector.add(e.vel, e.pos);
           e.acc = Vector.mult(e.acc, 0);
+          e.grounded = false;
+          e.canJump = false;
 
-          
+          if (e.vel.x !== 0) {
+            e.vel.x -= Math.sign(e.vel.x) * 0.3;
+            if (Math.abs(e.vel.x) < 0.1) {
+              e.vel.x = 0;
+            }
+          }
+
           for (let other of this._entities) {
             // don't collide with yourself
             if (other === e || other === undefined) continue;
