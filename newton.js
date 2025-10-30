@@ -142,6 +142,7 @@ const Newton = {
 
       // Movement stuff
       entity.pos = options.pos || { x: 0, y: 0 };
+      entity.prevPos = Vector.copy(options.pos);
       entity.vel = options.vel || { x: 0, y: 0 };
       entity.acc = { x: 0, y: 0 };
       entity.maxVel = options.maxVel || Infinity;
@@ -153,6 +154,12 @@ const Newton = {
       entity.mass = options.mass || 1;
       entity.canJump = false;
       entity.grounded = false;
+
+      // Gameplay stuff
+      entity.health = 100;
+      entity.rockets = 0;
+      entity.rocketCharge = 0;
+      entity.rocketChargeLimit = 300; // In frames
 
       // Important engine running stuff
       entity.gravityAffected = options.gravityAffected;
@@ -188,10 +195,13 @@ const Newton = {
         // remove it and see what happens
         let didColl = false;
         (function () {
+          // Funny stuff
+          // Skips y collision if entity is coming from the side
+          if (!(entity.prevPos.x + entity.halfw > other.pos.x - other.halfw &&
+        entity.prevPos.x - entity.halfw < other.pos.x + other.halfw)) return;
           if (entity.vel.y < 0) {
             didColl = true;
             entity.pos.y = other.pos.y + other.halfh + entity.halfh;
-            
             entity.vel.y = 0; // arbitrary amount
           } else if (entity.vel.y > 0) {
             didColl = true;
@@ -205,10 +215,10 @@ const Newton = {
 
         // collide in x axis
         (function () {
-          if (entity.vel.x > 0) {
+          if (entity.vel.x < 0) {
             entity.vel.x = 0;
             entity.pos.x = other.pos.x + other.halfw + entity.halfw;
-          } else if (entity.vel.x < 0) {
+          } else if (entity.vel.x > 0) {
             entity.vel.x = 0;
             entity.pos.x = other.pos.x - other.halfw - entity.halfw;
           }
@@ -316,7 +326,9 @@ const Newton = {
       engine.update = function () {
         // Global stuff
         // Apply gravity
+        // And set previous positions
         for (let e of this._entities) {
+          e.prevPos = Vector.copy(e.pos);
           if (e.gravityAffected && !e.isStatic) {
             e.applyForce(this._gravity, true);
           }
